@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Camera Stream</title>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --border: #2a2d3a;
+            --text: #e1e4ed;
+            --muted: #8b8fa5;
+            --accent: #6c8cff;
+            --accent-hover: #8ba3ff;
+            --danger: #ff5c6c;
+            --success: #4ade80;
+            --warning: #fbbf24;
+            --radius: 10px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* ---- Header ---- */
+        header {
+            width: 100%;
+            max-width: 1400px;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        header h1 {
+            font-size: 1.3rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        header h1 .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--danger);
+            transition: background 0.3s;
+        }
+        header h1 .dot.live { background: var(--success); }
+        header h1 .dot.warn { background: var(--warning); }
+
+        .controls {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .controls button, .controls select {
+            padding: 8px 16px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .controls button:hover:not(:disabled), .controls select:hover:not(:disabled) {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .controls button:disabled, .controls select:disabled { opacity: 0.5; cursor: wait; }
+        .controls button.primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+        .controls button.primary:hover:not(:disabled) {
+            background: var(--accent-hover);
+        }
+        .controls select { max-width: 320px; }
+
+        /* ---- Stream container ---- */
+        .stream-container {
+            width: 100%;
+            max-width: 1600px;
+            padding: 0 24px 24px;
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+        .stream-view {
+            flex: 1 1 480px;
+            min-width: 320px;
+            /* Bounded by the viewport so the whole frame always fits without
+               scrolling; the media inside is letterboxed, never cropped. */
+            height: calc(100vh - 170px);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px;
+        }
+        .stream-view img, .stream-view canvas {
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            display: block;
+        }
+        .stream-view .placeholder {
+            color: var(--muted);
+            font-size: 1.1rem;
+            text-align: center;
+            padding: 48px;
+        }
+        .stream-view .placeholder .icon {
+            font-size: 3rem;
+            display: block;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+        .stream-view .overlay {
+            position: absolute;
+            inset: 0;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 24px;
+            text-align: center;
+            background: rgba(15, 17, 23, 0.82);
+            backdrop-filter: blur(2px);
+            color: var(--text);
+        }
+        .stream-view .overlay.visible { display: flex; }
+        .stream-view .overlay .icon { font-size: 2.2rem; opacity: 0.7; }
+        .stream-view .overlay .detail { color: var(--muted); font-size: 0.85rem; }
+
+        /* ---- Info panel ---- */
+        .info-panel {
+            width: 280px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            font-size: 0.85rem;
+        }
+        .info-panel h3 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            color: var(--muted);
+        }
+        .info-row span:last-child {
+            color: var(--text);
+            font-weight: 500;
+            text-align: right;
+            overflow-wrap: anywhere;
+        }
+        .info-panel .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        .status-badge.online {
+            background: rgba(74,222,128,0.12);
+            color: var(--success);
+        }
+        .status-badge.offline {
+            background: rgba(255,92,108,0.12);
+            color: var(--danger);
+        }
+        .status-badge.pending {
+            background: rgba(251,191,36,0.12);
+            color: var(--warning);
+        }
+
+        /* ---- Toast ---- */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(16px);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--accent);
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 0.85rem;
+            color: var(--text);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s, transform 0.2s;
+            z-index: 10;
+            max-width: min(90vw, 520px);
+        }
+        .toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .toast.error { border-left-color: var(--danger); }
+
+        /* ---- Footer ---- */
+        footer {
+            padding: 12px 24px;
+            color: var(--muted);
+            font-size: 0.75rem;
+            text-align: center;
+        }
+
+        /* ---- Responsive ---- */
+        @media (max-width: 768px) {
+            .stream-container { flex-direction: column; }
+            .stream-view { min-width: unset; width: 100%; height: calc(100vh - 260px); }
+            .info-panel { width: 100%; flex-direction: row; flex-wrap: wrap; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>
+        <span class="dot" id="statusDot"></span>
+        Document Camera Stream
+    </h1>
+    <div class="controls">
+        <select id="cameraSelect" aria-label="Camera">
+            <option value="">Detecting cameras...</option>
+        </select>
+        <select id="resolutionSelect" aria-label="Capture resolution">
+            <option value="">Resolution...</option>
+        </select>
+        <button id="btnSnapshot" type="button">📷 Snapshot</button>
+        <button id="btnMode" type="button" class="primary">Mode: MJPEG</button>
+    </div>
+</header>
+
+<div class="stream-container">
+    <div class="stream-view" id="streamView">
+        <img id="mjpegImg" src="" alt="Camera stream">
+        <canvas id="wsCanvas" style="display:none;" aria-label="Camera stream"></canvas>
+        <div class="overlay" id="overlay">
+            <span class="icon">📷</span>
+            <strong id="overlayTitle">Connecting to camera...</strong>
+            <span class="detail" id="overlayDetail"></span>
+        </div>
+    </div>
+    <aside class="info-panel" id="infoPanel">
+        <h3>📡 Connection</h3>
+        <div>
+            <span class="status-badge offline" id="statusBadge">● Offline</span>
+        </div>
+        <div class="info-row"><span>Camera</span><span id="infoDevice">--</span></div>
+        <div class="info-row"><span>Resolution</span><span id="infoRes">--</span></div>
+        <div class="info-row"><span>Desktop</span><span id="infoDisplay">--</span></div>
+        <div class="info-row"><span>Camera FPS</span><span id="infoFps">--</span></div>
+        <div class="info-row"><span>Render FPS</span><span id="infoRenderFps">--</span></div>
+        <div class="info-row"><span>Network</span><span id="infoNetwork">--</span></div>
+        <div class="info-row"><span>Mode</span><span id="infoMode">MJPEG</span></div>
+        <div class="info-row"><span>Viewers</span><span id="infoViewers">--</span></div>
+    </aside>
+</div>
+
+<footer>
+    Open <code>/stream</code> for raw MJPEG &bull; <code>/ws</code> for WebSocket &bull; <code>/snapshot</code> for a still frame
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+    'use strict';
+
+    // ---- Elements ----
+    const $ = (id) => document.getElementById(id);
+    const statusDot = $('statusDot');
+    const statusBadge = $('statusBadge');
+    const infoDevice = $('infoDevice');
+    const infoRes = $('infoRes');
+    const infoDisplay = $('infoDisplay');
+    const infoFps = $('infoFps');
+    const infoRenderFps = $('infoRenderFps');
+    const infoNetwork = $('infoNetwork');
+    const infoMode = $('infoMode');
+    const infoViewers = $('infoViewers');
+    const btnMode = $('btnMode');
+    const btnSnapshot = $('btnSnapshot');
+    const cameraSelect = $('cameraSelect');
+    const resolutionSelect = $('resolutionSelect');
+    const mjpegImg = $('mjpegImg');
+    const wsCanvas = $('wsCanvas');
+    const wsCtx = wsCanvas.getContext('2d');
+    const overlay = $('overlay');
+    const overlayTitle = $('overlayTitle');
+    const overlayDetail = $('overlayDetail');
+    const toast = $('toast');
+
+    // ---- State ----
+    const state = {
+        mode: 'mjpeg',
+        ws: null,
+        reconnectTimer: null,
+        pendingBlob: null,
+        drawing: false,
+        info: null,
+        switching: false,
+        changingResolution: false,
+    };
+
+    // ---- Render FPS (client side) ----
+    let frames = 0;
+    let lastFpsAt = performance.now();
+    let renderFps = 0;
+
+    function countFrame() {
+        frames += 1;
+        const now = performance.now();
+        if (now - lastFpsAt >= 1000) {
+            renderFps = Math.round(frames / ((now - lastFpsAt) / 1000));
+            frames = 0;
+            lastFpsAt = now;
+            infoRenderFps.textContent = renderFps + ' fps';
+        }
+    }
+
+    // ---- Toast ----
+    let toastTimer = null;
+    function showToast(message, isError = false) {
+        toast.textContent = message;
+        toast.classList.toggle('error', Boolean(isError));
+        toast.classList.add('visible');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove('visible'), 3500);
+    }
+
+    // ---- Formatting ----
+    function formatRate(bytesPerSecond) {
+        if (!bytesPerSecond || bytesPerSecond <= 0) return '--';
+        const bits = bytesPerSecond * 8;
+        if (bits >= 1e9) return (bits / 1e9).toFixed(2) + ' Gb/s';
+        if (bits >= 1e6) return (bits / 1e6).toFixed(1) + ' Mb/s';
+        return Math.round(bits / 1e3) + ' kb/s';
+    }
+
+    function formatBytes(bytes) {
+        if (!bytes || bytes <= 0) return '0 B';
+        if (bytes >= 1e9) return (bytes / 1e9).toFixed(2) + ' GB';
+        if (bytes >= 1e6) return (bytes / 1e6).toFixed(1) + ' MB';
+        if (bytes >= 1e3) return Math.round(bytes / 1e3) + ' kB';
+        return Math.round(bytes) + ' B';
+    }
+
+    // ---- Status / overlay ----
+    function setOnline(info) {
+        const connected = Boolean(info && info.connected);
+        statusDot.className = 'dot' + (connected ? ' live' : '');
+        statusBadge.textContent = connected ? '● Live' : '● Offline';
+        statusBadge.className = 'status-badge ' + (connected ? 'online' : 'offline');
+
+        overlay.classList.toggle('visible', !connected);
+        if (!connected) {
+            const s = info ? info.state : 'connecting';
+            overlayTitle.textContent =
+                s === 'switching' ? 'Switching camera...' :
+                s === 'reconnecting' ? 'Camera disconnected' :
+                'Waiting for camera...';
+            overlayDetail.textContent =
+                (info && info.error) ? info.error : 'The server is retrying automatically.';
+        }
+    }
+
+    function renderInfo(info) {
+        state.info = info;
+        setOnline(info);
+        infoDevice.textContent = info.device_index === null || info.device_index === undefined
+            ? '--'
+            : `#${info.device_index}` + (info.backend ? ` (${info.backend})` : '');
+        infoRes.textContent = info.width && info.height ? `${info.width} × ${info.height}` : '--';
+        infoRes.title = info.target_width
+            ? `Requested ${info.target_width} × ${info.target_height}`
+            : '';
+        infoDisplay.textContent = info.display
+            ? `${info.display.width} × ${info.display.height}`
+            : 'unknown';
+        infoFps.textContent = info.fps ? `${info.fps} fps` : '--';
+        infoViewers.textContent = `${info.viewers} / ${info.max_viewers}`;
+
+        const net = info.network || {};
+        infoNetwork.textContent = formatRate(net.total_bps);
+        if (net.total_bps) {
+            const frame = net.frame_bytes ? ` · ~${formatBytes(net.frame_bytes)}/frame` : '';
+            infoNetwork.title =
+                `MJPEG ${formatRate(net.stream_bps)} · ` +
+                `WebSocket ${formatRate(net.websocket_bps)} · ` +
+                `${formatBytes(net.bytes_sent)} sent${frame}`;
+        } else {
+            infoNetwork.title = 'Nothing is being transmitted right now.';
+        }
+    }
+
+    async function pollInfo() {
+        try {
+            const res = await fetch('/api/info', { cache: 'no-store' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            renderInfo(await res.json());
+        } catch (err) {
+            setOnline(null);
+            overlayDetail.textContent = 'Cannot reach the server.';
+        } finally {
+            // Poll at a steady 1 s so the network meter moves smoothly.
+            setTimeout(pollInfo, 1000);
+        }
+    }
+
+    // ---- Cameras ----
+    async function loadCameras(force = false) {
+        try {
+            const res = await fetch('/api/cameras' + (force ? '?force=true' : ''), { cache: 'no-store' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const cameras = await res.json();
+
+            if (!cameras.length) {
+                cameraSelect.innerHTML = '<option value="">No cameras found</option>';
+                return;
+            }
+
+            const active = state.info ? state.info.device_index : null;
+            cameraSelect.innerHTML = '';
+            for (const cam of cameras) {
+                const option = document.createElement('option');
+                option.value = String(cam.index);
+                const label = cam.name || `Camera ${cam.index}`;
+                const tag = cam.is_document_camera ? ' · doc' : '';
+                const used = cam.in_use ? ' (active)' : '';
+                option.textContent = `${label} — ${cam.width}×${cam.height}${tag}${used}`;
+                cameraSelect.appendChild(option);
+            }
+            if (active !== null && cameras.some((cam) => cam.index === active)) {
+                cameraSelect.value = String(active);
+            }
+        } catch (err) {
+            console.error('Failed to list cameras', err);
+            cameraSelect.innerHTML = '<option value="">Camera list unavailable</option>';
+        }
+    }
+
+    async function switchCamera(value) {
+        if (!value || state.switching) return;
+        const index = Number(value);
+        if (state.info && index === state.info.device_index) return;
+
+        state.switching = true;
+        cameraSelect.disabled = true;
+        try {
+            const res = await fetch(`/api/camera/${index}`, { method: 'POST' });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                const detail = body.detail && body.detail.error ? body.detail.error : (body.error || 'Switch failed');
+                throw new Error(detail);
+            }
+            showToast(`Switched to camera ${index}`);
+            renderInfo(body);
+            restartStream();
+            await loadCameras(true);
+        } catch (err) {
+            showToast(err.message || 'Could not switch camera', true);
+            if (state.info) cameraSelect.value = String(state.info.device_index);
+        } finally {
+            state.switching = false;
+            cameraSelect.disabled = false;
+        }
+    }
+
+    // ---- Resolutions ----
+    function errorText(body, fallback) {
+        if (!body) return fallback;
+        const detail = body.detail;
+        if (typeof detail === 'string') return detail;
+        if (Array.isArray(detail) && detail.length) return detail[0].msg || fallback;
+        if (detail && detail.error) return detail.error;
+        return body.error || fallback;
+    }
+
+    async function loadResolutions() {
+        try {
+            const res = await fetch('/api/resolutions', { cache: 'no-store' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+
+            resolutionSelect.innerHTML = '';
+            let selected = null;
+            for (const mode of data.resolutions) {
+                const option = document.createElement('option');
+                option.value = `${mode.width}x${mode.height}`;
+                const substituted = mode.tested && mode.tested.exact === false;
+                option.textContent = substituted
+                    ? `${mode.label} — camera: ${mode.tested.actual}`
+                    : mode.label;
+                if (mode.current) selected = option.value;
+                resolutionSelect.appendChild(option);
+            }
+
+            if (selected) {
+                resolutionSelect.value = selected;
+            } else if (data.current) {
+                // The camera reported a size that is not in the catalog.
+                const option = document.createElement('option');
+                option.value = `${data.current.width}x${data.current.height}`;
+                option.textContent =
+                    `${data.current.width} × ${data.current.height} — reported by camera`;
+                resolutionSelect.insertBefore(option, resolutionSelect.firstChild);
+                resolutionSelect.value = option.value;
+            }
+        } catch (err) {
+            console.error('Failed to list resolutions', err);
+            resolutionSelect.innerHTML = '<option value="">Resolutions unavailable</option>';
+        }
+    }
+
+    async function changeResolution(value) {
+        if (!value || state.changingResolution) return;
+        const [width, height] = value.split('x').map(Number);
+        if (!width || !height) return;
+
+        state.changingResolution = true;
+        resolutionSelect.disabled = true;
+        try {
+            const res = await fetch('/api/resolution', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ width, height }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(errorText(body, `Could not switch to ${width} × ${height}`));
+            }
+            renderInfo(body);
+            if (body.exact) {
+                showToast(`Resolution ${width} × ${height}`);
+            } else {
+                showToast(
+                    `Camera reported ${body.width} × ${body.height} instead of ${width} × ${height}`,
+                    true
+                );
+            }
+        } catch (err) {
+            showToast(err.message || 'Could not change resolution', true);
+        } finally {
+            state.changingResolution = false;
+            resolutionSelect.disabled = false;
+            await loadResolutions();
+        }
+    }
+
+    // ---- MJPEG mode ----
+    function startMjpeg() {
+        stopWs();
+        wsCanvas.style.display = 'none';
+        mjpegImg.style.display = 'block';
+        mjpegImg.src = '/stream';
+        infoMode.textContent = 'MJPEG';
+        btnMode.textContent = 'Mode: MJPEG';
+    }
+
+    mjpegImg.addEventListener('load', countFrame);
+    mjpegImg.addEventListener('error', () => {
+        // The MJPEG connection dropped; the info poll drives the overlay.
+        if (state.mode === 'mjpeg') setTimeout(restartMjpeg, 1500);
+    });
+
+    function restartMjpeg() {
+        if (state.mode !== 'mjpeg') return;
+        mjpegImg.src = '/stream';
+    }
+
+    // ---- WebSocket mode ----
+    function connectWs() {
+        stopWs();
+        mjpegImg.style.display = 'none';
+        wsCanvas.style.display = 'block';
+        infoMode.textContent = 'WebSocket';
+        btnMode.textContent = 'Mode: WebSocket';
+
+        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${protocol}//${location.host}/ws`);
+        ws.binaryType = 'blob';
+        state.ws = ws;
+
+        ws.onopen = () => {
+            statusDot.className = 'dot live';
+            statusBadge.textContent = '● Live';
+            statusBadge.className = 'status-badge online';
+        };
+
+        ws.onmessage = (event) => {
+            if (typeof event.data === 'string') return;   // control message
+            if (!(event.data instanceof Blob)) return;
+            // Keep only the newest frame: decoding is async and slow clients
+            // should skip frames rather than build a backlog.
+            state.pendingBlob = event.data;
+            if (!state.drawing) drawLoop();
+        };
+
+        ws.onclose = () => {
+            state.ws = null;
+            statusDot.className = 'dot';
+            statusBadge.textContent = '● Offline';
+            statusBadge.className = 'status-badge offline';
+            if (state.mode === 'ws') {
+                state.reconnectTimer = setTimeout(connectWs, 2000);
+            }
+        };
+
+        ws.onerror = () => {
+            if (state.ws) state.ws.close();
+        };
+    }
+
+    async function drawLoop() {
+        state.drawing = true;
+        while (state.pendingBlob) {
+            const blob = state.pendingBlob;
+            state.pendingBlob = null;
+            try {
+                const bitmap = await createImageBitmap(blob);
+                if (wsCanvas.width !== bitmap.width || wsCanvas.height !== bitmap.height) {
+                    wsCanvas.width = bitmap.width;
+                    wsCanvas.height = bitmap.height;
+                }
+                wsCtx.drawImage(bitmap, 0, 0);
+                bitmap.close();
+                countFrame();
+            } catch (err) {
+                // A corrupt frame is not worth surfacing; the next one arrives.
+            }
+        }
+        state.drawing = false;
+    }
+
+    function stopWs() {
+        if (state.reconnectTimer) {
+            clearTimeout(state.reconnectTimer);
+            state.reconnectTimer = null;
+        }
+        if (state.ws) {
+            state.ws.onclose = null;   // no auto-reconnect for a deliberate stop
+            state.ws.onmessage = null;
+            state.ws.close();
+            state.ws = null;
+        }
+        state.pendingBlob = null;
+    }
+
+    function restartStream() {
+        if (state.mode === 'mjpeg') restartMjpeg();
+        else connectWs();
+    }
+
+    function toggleMode() {
+        if (state.mode === 'mjpeg') {
+            state.mode = 'ws';
+            connectWs();
+        } else {
+            state.mode = 'mjpeg';
+            startMjpeg();
+        }
+    }
+
+    // ---- Snapshot ----
+    async function takeSnapshot() {
+        btnSnapshot.disabled = true;
+        try {
+            const res = await fetch('/snapshot', { cache: 'no-store' });
+            if (!res.ok) throw new Error('Camera not available');
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `snapshot-${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
+        } catch (err) {
+            showToast(err.message || 'Snapshot failed', true);
+        } finally {
+            btnSnapshot.disabled = false;
+        }
+    }
+
+    // ---- Wiring ----
+    btnMode.addEventListener('click', toggleMode);
+    btnSnapshot.addEventListener('click', takeSnapshot);
+    cameraSelect.addEventListener('change', (event) => switchCamera(event.target.value));
+    cameraSelect.addEventListener('focus', () => loadCameras(false));
+    resolutionSelect.addEventListener('change', (event) => changeResolution(event.target.value));
+
+    // ---- Init ----
+    async function init() {
+        await pollInfo();
+        await Promise.all([loadCameras(false), loadResolutions()]);
+        startMjpeg();
+    }
+
+    init();
+})();
+</script>
+</body>
+</html>

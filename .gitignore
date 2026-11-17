@@ -1,0 +1,10 @@
+# Local virtualenv
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Sandbox/ACL recovery artefacts, if a repair ever writes them here
+dsh-acl-recovery/
