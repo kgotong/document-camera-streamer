@@ -94,6 +94,8 @@ python server.py [--resolution WxH] [--desktop-fit] [--screen WxH]
 
 | Option | Effect |
 |---|---|
+| `--port N` | Bind port (default `8080`, or `DOCSTREAM_PORT`) |
+| `--host HOST` | Bind address (default `0.0.0.0`, all interfaces) |
 | `--resolution WxH` | Request a capture mode, e.g. `--resolution 1920x1080` |
 | `--desktop-fit` | Pick the best common mode that fits this machine's desktop (largest, preferring the screen's shape) |
 | `--fit-margin FRACTION` | How much of the desktop to use (default `0.9`, leaving room for window chrome) |
